@@ -1,0 +1,812 @@
+diff --git a/RecompOne.Runtime/Assets/AssetPack.cs b/RecompOne.Runtime/Assets/AssetPack.cs
+index b3ce5e3..f6755d6 100644
+--- a/RecompOne.Runtime/Assets/AssetPack.cs
++++ b/RecompOne.Runtime/Assets/AssetPack.cs
+@@ -9,7 +9,10 @@ public sealed class AssetPack : IDisposable
+     {
+         PropertyNameCaseInsensitive = true,
+         ReadCommentHandling = JsonCommentHandling.Skip,
+-        AllowTrailingCommas = true
++        AllowTrailingCommas = true,
++#if RECOMPONE_UWP
++        TypeInfoResolver = Config.RecompOneJson.Default
++#endif
+     };
+ 
+     private readonly string _root;
+diff --git a/RecompOne.Runtime/Config/ConfigManager.cs b/RecompOne.Runtime/Config/ConfigManager.cs
+index 09bb2e6..89eef00 100644
+--- a/RecompOne.Runtime/Config/ConfigManager.cs
++++ b/RecompOne.Runtime/Config/ConfigManager.cs
+@@ -19,7 +19,10 @@ public static class ConfigManager
+     private static readonly JsonSerializerOptions _opts = new()
+     {
+         WriteIndented = true,
+-        DefaultIgnoreCondition = JsonIgnoreCondition.Never
++        DefaultIgnoreCondition = JsonIgnoreCondition.Never,
++#if RECOMPONE_UWP
++        TypeInfoResolver = RecompOneJson.Default
++#endif
+     };
+ 
+     private const string GameConfigPath = "settings.json";
+diff --git a/RecompOne.Runtime/Config/RecompOneJson.cs b/RecompOne.Runtime/Config/RecompOneJson.cs
+new file mode 100644
+index 0000000..ce70f6c
+--- /dev/null
++++ b/RecompOne.Runtime/Config/RecompOneJson.cs
+@@ -0,0 +1,12 @@
++#if RECOMPONE_UWP
++using System.Text.Json.Serialization;
++using RecompOne.Runtime.Assets;
++
++namespace RecompOne.Runtime.Config;
++
++// NativeAOT: System.Text.Json por reflexión no tiene código nativo para los genéricos con tipos de valor
++// (JsonPropertyInfo<PadKind>). settings.json y los manifiestos de packs usan metadatos generados al compilar.
++[JsonSerializable(typeof(GameConfig))]
++[JsonSerializable(typeof(PackManifest))]
++internal sealed partial class RecompOneJson : JsonSerializerContext;
++#endif
+diff --git a/RecompOne.Runtime/Host/Audio.cs b/RecompOne.Runtime/Host/Audio.cs
+index 1cc5b4d..9a208b6 100644
+--- a/RecompOne.Runtime/Host/Audio.cs
++++ b/RecompOne.Runtime/Host/Audio.cs
+@@ -32,6 +32,26 @@ internal static unsafe class Audio
+     private static double _maxMixMs, _totalMixMs;
+     private static int _refillPasses, _emptyQueueAfterStartup;
+ 
++#if RECOMPONE_UWP
++    // Xbox: no OpenAL Soft for UWP; output goes through SDL2's audio queue (WinRT WASAPI).
++    // The device is opened at its own rate (48 kHz on the console) and the SPU's 44.1 kHz goes through SDL's
++    // resampler (SDL_AudioStream, windowed sinc): when asked for 44.1 kHz, SDL 2.28 hands the conversion to WASAPI
++    // (AUTOCONVERTPCM | SRC_DEFAULT_QUALITY), which on the Xbox sounds dull and crunchy.
++    private const uint AudioS16Lsb = 0x8010;
++    private const int SpuRate = 44100;
++    private const int BytesPerBuffer = FramesPerBuffer * 4;
++    private const int QueueMs = 50;                 // kept queued in the device (the PC path keeps ~46 ms)
++    private static Silk.NET.SDL.Sdl? _sdl;
++    private static uint _sdlDevice;
++    private static Silk.NET.SDL.AudioStream* _resampler;
++    private static int _deviceRate = SpuRate;
++    private static int _targetBytes;
++    private static readonly short[] _scaled = new short[FramesPerBuffer * 2];
++    private static byte[] _deviceBuf = new byte[16384];
++    private static int _minQueued = int.MaxValue;
++    private static long _nextStatMs;
++#endif
++
+     private static void CaptureSamples()
+     {
+         if (_capture == null) return;
+@@ -70,6 +90,82 @@ internal static unsafe class Audio
+ 
+     public static void Initialize()
+     {
++#if RECOMPONE_UWP
++        try
++        {
++            _sdl = Silk.NET.SDL.Sdl.GetApi();
++            if (_sdl.InitSubSystem(Silk.NET.SDL.Sdl.InitAudio) != 0)
++            {
++                Console.Error.WriteLine($"[Host] SDL audio init failed: {_sdl.GetErrorS()}");
++                _sdl = null;
++                return;
++            }
++
++            // The default device's own rate, so that WASAPI does not resample (48 kHz if SDL cannot say).
++            var rate = 48000;
++            int defRate = -1, defChannels = -1;
++            Silk.NET.SDL.AudioSpec info;
++            byte* infoName = null;
++            if (_sdl.GetDefaultAudioInfo(&infoName, &info, 0) == 0)
++            {
++                defRate = info.Freq;
++                defChannels = info.Channels;
++                if (info.Freq > 0) rate = info.Freq;
++                if (infoName != null) _sdl.Free(infoName);
++            }
++
++            var want = new Silk.NET.SDL.AudioSpec
++            {
++                Freq = rate,
++                Format = (ushort)AudioS16Lsb,
++                Channels = 2,
++                Samples = 1024
++            };
++            Silk.NET.SDL.AudioSpec have;
++            _sdlDevice = _sdl.OpenAudioDevice((byte*)null, 0, &want, &have, 0);
++            if (_sdlDevice == 0)
++            {
++                Console.Error.WriteLine($"[Host] no audio device, audio disabled: {_sdl.GetErrorS()}");
++                _sdl = null;
++                return;
++            }
++
++            _deviceRate = have.Freq;
++            if (_deviceRate != SpuRate)
++            {
++                _resampler = _sdl.NewAudioStream((ushort)AudioS16Lsb, 2, SpuRate, (ushort)AudioS16Lsb, 2, _deviceRate);
++                if (_resampler == null)
++                {
++                    // No SDL resampler: back to 44.1 kHz and WASAPI's conversion, as before.
++                    Console.Error.WriteLine($"[Host] SDL_NewAudioStream failed ({_sdl.GetErrorS()}); WASAPI resamples");
++                    _sdl.CloseAudioDevice(_sdlDevice);
++                    want.Freq = SpuRate;
++                    _sdlDevice = _sdl.OpenAudioDevice((byte*)null, 0, &want, &have, 0);
++                    if (_sdlDevice == 0)
++                    {
++                        Console.Error.WriteLine($"[Host] no audio device, audio disabled: {_sdl.GetErrorS()}");
++                        _sdl = null;
++                        return;
++                    }
++                    _deviceRate = have.Freq;
++                }
++            }
++            _targetBytes = _deviceRate * QueueMs / 1000 * 4;
++
++            Console.WriteLine($"[Host] SDL audio: {have.Freq} Hz, {have.Channels} ch, {have.Samples} samples" +
++                              $" (default device {defRate} Hz, {defChannels} ch); SPU {SpuRate} Hz via " +
++                              (_resampler != null ? "the SDL resampler" : "no resampler") + $"; queue {QueueMs} ms");
++            _sdl.PauseAudioDevice(_sdlDevice, 0);
++
++            _running = true;
++            _mixerThread = new Thread(MixerLoop) { IsBackground = true, Name = "spu-mixer" };
++            _mixerThread.Start();
++        }
++        catch (Exception e)
++        {
++            Console.Error.WriteLine($"[Host] audio init failed: {e.Message}");
++        }
++#else
+         try
+         {
+             _alc = ALContext.GetApi(true);
+@@ -114,6 +210,7 @@ internal static unsafe class Audio
+         {
+             Console.Error.WriteLine($"[Host] audio init failed: {e.Message}");
+         }
++#endif
+     }
+ 
+     public static void Attach(Spu? spu)
+@@ -132,8 +229,10 @@ internal static unsafe class Audio
+     public static void SetMasterVolume(float volume)
+     {
+         _masterVolume = Math.Clamp(volume, 0f, 1f);
++#if !RECOMPONE_UWP
+         if (_al != null && _source != 0)
+             _al.SetSourceProperty(_source, SourceFloat.Gain, _masterVolume);
++#endif
+     }
+ 
+     private static readonly int BufferMs = Math.Max(1, FramesPerBuffer * 1000 / 44100);
+@@ -150,6 +249,56 @@ internal static unsafe class Audio
+ 
+     private static void FillBuffers(Spu spu)
+     {
++#if RECOMPONE_UWP
++        var queued = (int)_sdl!.GetQueuedAudioSize(_sdlDevice);
++        if (queued == 0) _restarts++;
++        if (queued < _minQueued) _minQueued = queued;
++        // SPU blocks of FramesPerBuffer at 44.1 kHz until ~QueueMs of device-rate audio is queued (the bound keeps a
++        // resampler that produces nothing from mixing ahead forever).
++        for (var blocks = 0; queued < _targetBytes && blocks < 64; blocks++)
++        {
++            spu.Mix(_sampleBuf, FramesPerBuffer, synchronizeIrq: true);
++            CaptureSamples();
++
++            var gain = _masterVolume;
++            for (var i = 0; i < _sampleBuf.Length; i++) _scaled[i] = (short)(_sampleBuf[i] * gain);
++            fixed (short* p = _scaled)
++            {
++                if (_resampler == null)
++                {
++                    _sdl.QueueAudio(_sdlDevice, p, BytesPerBuffer);
++                    queued += BytesPerBuffer;
++                    continue;
++                }
++                _sdl.AudioStreamPut(_resampler, p, BytesPerBuffer);
++            }
++
++            var avail = _sdl.AudioStreamAvailable(_resampler) & ~3;
++            if (avail <= 0) continue;
++            if (_deviceBuf.Length < avail) _deviceBuf = new byte[avail * 2];
++            fixed (byte* d = _deviceBuf)
++            {
++                var got = _sdl.AudioStreamGet(_resampler, d, avail);
++                if (got > 0)
++                {
++                    _sdl.QueueAudio(_sdlDevice, d, (uint)got);
++                    queued += got;
++                }
++            }
++        }
++
++        // Every 10 s in run.log: the lowest queue level seen and how often the queue had run dry (= crackles).
++        var now = Environment.TickCount64;
++        if (now >= _nextStatMs)
++        {
++            if (_nextStatMs != 0)
++                Console.WriteLine($"[audio] last 10 s: queue min {(long)_minQueued * 1000 / ((long)_deviceRate * 4)} ms, " +
++                                  $"empty at refill {_restarts}");
++            _nextStatMs = now + 10000;
++            _minQueued = int.MaxValue;
++            _restarts = 0;
++        }
++#else
+         _al!.GetSourceProperty(_source, GetSourceInteger.BuffersProcessed, out var processed);
+         _maxProcessed = Math.Max(_maxProcessed, processed);
+         if (processed > 0)
+@@ -180,10 +329,26 @@ internal static unsafe class Audio
+             _restarts++;
+             _al.SourcePlay(_source);
+         }
++#endif
+     }
+ 
+     public static void Shutdown()
+     {
++#if RECOMPONE_UWP
++        if (_sdl == null) return;
++        _running = false;
++        _mixerThread?.Join();
++        _capture?.Dispose();
++        _capture = null;
++        _sdl.CloseAudioDevice(_sdlDevice);
++        _sdlDevice = 0;
++        if (_resampler != null)
++        {
++            _sdl.FreeAudioStream(_resampler);
++            _resampler = null;
++        }
++        return;
++#endif
+         if (_alc == null) return;
+         _running = false;
+         _mixerThread?.Join();
+diff --git a/RecompOne.Runtime/Host/InputManager.cs b/RecompOne.Runtime/Host/InputManager.cs
+index e191dad..26a86e7 100644
+--- a/RecompOne.Runtime/Host/InputManager.cs
++++ b/RecompOne.Runtime/Host/InputManager.cs
+@@ -149,6 +149,21 @@ internal static unsafe class InputManager
+         _sdl = null;
+     }
+ 
++#if RECOMPONE_UWP
++    private static int _joystickCount = -1;
++
++    // Xbox: la ventana también es de SDL y su bucle (Silk.NET) se lleva todos los eventos, así que aquí no se
++    // vacía la cola. Las altas y bajas de mandos se ven en el número de joysticks, que SDL actualiza al bombear.
++    private static void PollGamepadEvents()
++    {
++        if (_sdl == null) return;
++        var count = _sdl.NumJoysticks();
++        if (count == _joystickCount) return;
++        Console.WriteLine($"[Input] joysticks: {count}");
++        _joystickCount = count;
++        Rescan();
++    }
++#else
+     private static void PollGamepadEvents()
+     {
+         if (_sdl == null) return;
+@@ -178,6 +193,7 @@ internal static unsafe class InputManager
+ 
+         if (changed) Rescan();
+     }
++#endif
+ 
+     private static void CloseControllers()
+     {
+@@ -345,6 +361,20 @@ internal static unsafe class InputManager
+                cfg.Up.Length > 0 || cfg.Down.Length > 0 || cfg.Left.Length > 0 || cfg.Right.Length > 0;
+     }
+ 
++#if RECOMPONE_UWP
++    // Xbox: R3 (el clic del stick derecho) enciende y apaga el contador de FPS, que en la consola se dibuja como un
++    // rótulo suelto porque la barra de menús va oculta (HostWindow). El juego no usa ese botón; el mando va como
++    // digital salvo que se pida analógico. Se mira el flanco en la palabra de botones ya compuesta (0 = pulsado).
++    private static bool _r3Held;
++
++    private static void ToggleFpsWithR3(ushort state)
++    {
++        var down = (state & Controller.R3) == 0;
++        if (down && !_r3Held) ConfigManager.View.ShowFps = !ConfigManager.View.ShowFps;
++        _r3Held = down;
++    }
++#endif
++
+     private static void PollGamepads()
+     {
+         if (_sdl == null) return;
+@@ -353,6 +383,9 @@ internal static unsafe class InputManager
+         {
+             var bind = ConfigManager.Game.PadFor(0);
+             Controller.State = PadState(_pad0, bind, Controller.State);
++#if RECOMPONE_UWP
++            ToggleFpsWithR3(Controller.State);
++#endif
+             Controller.LeftX = Axis(_pad0, bind.LeftStickX);
+             Controller.LeftY = Axis(_pad0, bind.LeftStickY);
+             Controller.RightX = Axis(_pad0, bind.RightStickX);
+diff --git a/RecompOne.Runtime/Host/Window/HostWindow.cs b/RecompOne.Runtime/Host/Window/HostWindow.cs
+index 757c064..621dacb 100644
+--- a/RecompOne.Runtime/Host/Window/HostWindow.cs
++++ b/RecompOne.Runtime/Host/Window/HostWindow.cs
+@@ -13,10 +13,40 @@ namespace RecompOne.Runtime.Host;
+ 
+ public static class HostWindow
+ {
++#if RECOMPONE_UWP
++    // Xbox (UWP): el backend SDL de Silk.NET solo ofrece vistas en WinRT (SDL_GetPlatform() = "WinRT"),
++    // así que aquí hay IView en vez de IWindow: sin título, icono ni modo de ventana.
++    private static IView? _window;
++    private static string _title = "";
++
++    // Mesa en la Xbox: presentar durante los primeros fotogramas deja el contexto sin poder crear recursos
++    // (GL_OUT_OF_MEMORY para siempre). Se dibujan, pero no se presentan.
++    private const int SkippedPresents = 32;
++    private static int _presents;
++#else
+     private static IWindow? _window;
++#endif
+     private static GL? _gl;
+     private static ImGuiController? _imgui;
+     private static bool _headless;
++
++#if RECOMPONE_UWP
++    // En WinRT la plataforma de Silk.NET es «view-only» y su DoEvents lanza
++    // NotImplementedException en CADA cuadro. Avisar siempre llenaba run.log con 35 367 líneas
++    // iguales (el 99,7 % del archivo) y escondía lo demás, incluidas las cargas de overlay que
++    // hacían falta para depurar el cierre tras el primer nivel (2026-10-10). Se deja una vez por
++    // tipo y mensaje, y con el tipo delante, que es el dato que faltaba.
++    private static readonly HashSet<string> _avisados = [];
++
++    private static void AvisarUnaVez(Exception e)
++    {
++        var clave = e.GetType().FullName + ": " + e.Message;
++        if (_avisados.Add(clave))
++            Console.WriteLine($"[Host] {clave} (no se repite este aviso)");
++    }
++#else
++    private static void AvisarUnaVez(Exception e) => Console.WriteLine(e.Message);
++#endif
+     private static Gpu? _gpu;
+ 
+     private static uint _displayTex;
+@@ -49,6 +79,7 @@ public static class HostWindow
+ 
+     private static unsafe float QueryDpiScale()
+     {
++#if !RECOMPONE_UWP
+         try
+         {
+             var glfw = Silk.NET.GLFW.Glfw.GetApi();
+@@ -64,6 +95,7 @@ public static class HostWindow
+         {
+             Console.WriteLine($"[Host] cant read scale: {e.Message}");
+         }
++#endif
+ 
+         try
+         {
+@@ -114,9 +146,31 @@ public static class HostWindow
+         Pgxp.Pgxp.Load();
+         Interp.Interp.Load();
+ 
++#if RECOMPONE_UWP
++        _title = title;
++        // El SDL de WinRT viene sin háptico: con Sdl.InitHaptic (lo trae SdlProvider por defecto) SDL_Init falla.
++        Silk.NET.SDL.SdlProvider.InitFlags = Silk.NET.SDL.Sdl.InitVideo | Silk.NET.SDL.Sdl.InitJoystick |
++                                             Silk.NET.SDL.Sdl.InitGamecontroller | Silk.NET.SDL.Sdl.InitEvents;
++        // NativeAOT: las plataformas se registran a mano (Silk.NET las busca por reflexión).
++        Silk.NET.Windowing.Sdl.SdlWindowing.Use();
++        Silk.NET.Input.Sdl.SdlInput.Use();
++#endif
++
+         foreach (var api in ApiChain())
+             try
+             {
++#if RECOMPONE_UWP
++                Silk.NET.Windowing.Sdl.SdlWindowing.Use();
++                var options = ViewOptions.Default with
++                {
++                    VSync = ConfigManager.View.VSync,
++                    UpdatesPerSecond = 0,
++                    FramesPerSecond = 0,
++                    ShouldSwapAutomatically = false,
++                    API = api
++                };
++                _window = Silk.NET.Windowing.Window.GetView(options);
++#else
+                 var options = WindowOptions.Default with
+                 {
+                     Size = new Vector2D<int>(1280, 720),
+@@ -128,6 +182,7 @@ public static class HostWindow
+                     API = api
+                 };
+                 _window = Silk.NET.Windowing.Window.Create(options);
++#endif
+                 FrameClock.VSync = ConfigManager.View.VSync;
+                 Interp.Interp.VSync = ConfigManager.View.VSync;
+                 Interp.Interp.RefreshRate = QueryRefreshRate();
+@@ -143,6 +198,21 @@ public static class HostWindow
+             {
+                 Console.Error.WriteLine(
+                     $"[Host] context {api.Version.MajorVersion}.{api.Version.MinorVersion} unavailable: {e.Message}");
++#if RECOMPONE_UWP
++                // La plataforma SDL guarda la primera vista que crea y WinRT admite una sola ventana SDL:
++                // para probar la versión siguiente hay que soltar las dos.
++                try
++                {
++                    _window?.Dispose();
++                }
++                catch (Exception disposeError)
++                {
++                    Console.Error.WriteLine($"[Host] failed view dispose: {disposeError.Message}");
++                }
++
++                if (Silk.NET.Windowing.Window.GetWindowPlatform(true) is { } platform)
++                    Silk.NET.Windowing.Window.Remove(platform);
++#endif
+                 _window = null;
+             }
+ 
+@@ -150,6 +220,13 @@ public static class HostWindow
+         _headless = true;
+     }
+ 
++#if RECOMPONE_UWP
++    public static string Title
++    {
++        get => _title;
++        set => _title = value ?? "";
++    }
++#else
+     public static string Title
+     {
+         get => _window?.Title ?? "";
+@@ -158,6 +235,7 @@ public static class HostWindow
+             if (_window != null) _window.Title = value ?? "";
+         }
+     }
++#endif
+ 
+     public static void SetTitle(string title)
+     {
+@@ -201,6 +279,7 @@ public static class HostWindow
+     public static void ClearIcon()
+     {
+         _pendingIcon = null;
++#if !RECOMPONE_UWP
+         if (_window == null) return;
+         try
+         {
+@@ -210,10 +289,15 @@ public static class HostWindow
+         {
+             Console.Error.WriteLine($"[Host] failed to clear icon: {e.Message}");
+         }
++#endif
+     }
+ 
+     private static void Apply(Silk.NET.Core.RawImage image)
+     {
++#if RECOMPONE_UWP
++        // UWP: el icono es el del paquete (Assets del manifiesto).
++    }
++#else
+         if (_window == null) return;
+         try
+         {
+@@ -225,6 +309,7 @@ public static class HostWindow
+             Console.Error.WriteLine($"[Host] failed to set icon: {e.Message}");
+         }
+     }
++#endif
+ 
+     private static byte[]? Decode(byte[] data, out int width, out int height)
+     {
+@@ -285,7 +370,7 @@ public static class HostWindow
+         }
+         catch (Exception e)
+         {
+-            Console.WriteLine(e.Message);
++            AvisarUnaVez(e);
+         }
+ 
+         if (_window.IsClosing)
+@@ -324,7 +409,7 @@ public static class HostWindow
+         }
+         catch (Exception e)
+         {
+-            Console.WriteLine(e.Message);
++            AvisarUnaVez(e);
+         }
+         
+         if (_window.IsClosing)
+@@ -394,13 +479,16 @@ public static class HostWindow
+ 
+     public static void SetFullscreen(bool on)
+     {
++#if !RECOMPONE_UWP
+         if (_window == null) return;
+         _window.WindowState = on ? WindowState.Fullscreen : WindowState.Normal;
+         if (on) SetAutoIconify(false);
++#endif
+     }
+ 
+     private static unsafe void SetAutoIconify(bool on)
+     {
++#if !RECOMPONE_UWP
+         try
+         {
+             var handle = _window?.Native?.Glfw;
+@@ -413,6 +501,7 @@ public static class HostWindow
+         {
+             Console.WriteLine($"[Host] auto-iconify unavailable: {e.Message}");
+         }
++#endif
+     }
+ 
+     public static bool IsKeyDown(Key k)
+@@ -597,19 +686,28 @@ public static class HostWindow
+     {
+         try
+         {
++#if RECOMPONE_UWP
++            return Silk.NET.SDL.SdlProvider.SDL.Value.GLSetSwapInterval(interval) == 0;
++#else
+             Silk.NET.GLFW.Glfw.GetApi().SwapInterval(interval);
+             return true;
++#endif
+         }
+         catch
+         {
+             return false;
+         }
+     }
+-    
++
+     private static unsafe int QueryRefreshRate()
+     {
+         try
+         {
++#if RECOMPONE_UWP
++            Silk.NET.SDL.DisplayMode current;
++            if (Silk.NET.SDL.SdlProvider.SDL.Value.GetCurrentDisplayMode(0, &current) != 0) return 0;
++            return current.RefreshRate is > 0 and <= 1000 ? current.RefreshRate : 0;
++#else
+             var glfw = Silk.NET.GLFW.Glfw.GetApi();
+             var monitor = glfw.GetPrimaryMonitor();
+             if (monitor == null) return 0;
+@@ -619,6 +717,7 @@ public static class HostWindow
+             
+             var rate = mode->RefreshRate;
+             return rate is > 0 and <= 1000 ? rate : 0;
++#endif
+         }
+         catch (Exception e)
+         {
+@@ -677,6 +776,10 @@ public static class HostWindow
+ 
+         if (!ConfigManager.View.HideTopBar)
+             MainMenuBar.Draw();
++#if RECOMPONE_UWP
++        else
++            DrawFpsOverlay();
++#endif
+ 
+         DrawDockspace();
+         PanelManager.DrawPanels();
+@@ -684,7 +787,33 @@ public static class HostWindow
+         gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+         gl.Viewport(0, 0, (uint)fbDef.X, (uint)fbDef.Y);
+         _imgui.Render();
++#if RECOMPONE_UWP
++        if (++_presents > SkippedPresents) _window!.GLContext?.SwapBuffers();
++        else if (_presents == SkippedPresents) Console.WriteLine($"[Host] first {SkippedPresents} frames not presented");
++#endif
++    }
++
++#if RECOMPONE_UWP
++    // Xbox: el contador de FPS vive en la barra de menús (MainMenuBar.DrawFps), que aquí va oculta porque no hay
++    // ratón. Con la barra oculta se dibuja aparte, arriba a la izquierda, sobre un recuadro translúcido. Lo gobierna
++    // el mismo ajuste de siempre, View.ShowFps, que R3 enciende y apaga (InputManager).
++    private static void DrawFpsOverlay()
++    {
++        if (!ConfigManager.View.ShowFps) return;
++
++        var viewport = ImGui.GetMainViewport();
++        ImGui.SetNextWindowPos(viewport.WorkPos + new Vector2(12f, 12f));
++        ImGui.SetNextWindowBgAlpha(0.45f);
++        const ImGuiWindowFlags flags = ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.AlwaysAutoResize |
++                                       ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoFocusOnAppearing |
++                                       ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoInputs |
++                                       ImGuiWindowFlags.NoDocking;
++        if (ImGui.Begin("##fps_overlay", flags))
++            ImGui.TextUnformatted($"{FrameClock.PresentFps:F0} / {FrameClock.Fps:F0} FPS");
++
++        ImGui.End();
+     }
++#endif
+ 
+     private static void DrawDockspace()
+     {
+diff --git a/RecompOne.Runtime/Host/Window/Popups/DiscPickerPopup.cs b/RecompOne.Runtime/Host/Window/Popups/DiscPickerPopup.cs
+index c8f0600..c639219 100644
+--- a/RecompOne.Runtime/Host/Window/Popups/DiscPickerPopup.cs
++++ b/RecompOne.Runtime/Host/Window/Popups/DiscPickerPopup.cs
+@@ -1,6 +1,8 @@
+ using System.Numerics;
+ using ImGuiNET;
++#if !RECOMPONE_UWP
+ using NativeFileDialogNET;
++#endif
+ using RecompOne.Runtime.Config;
+ 
+ namespace RecompOne.Runtime.Host.Window;
+@@ -52,6 +54,10 @@ public sealed class DiscPickerPopup : Popup
+ 
+     private void Browse()
+     {
++#if RECOMPONE_UWP
++        // UWP: no hay diálogo de archivos nativo; el disco va en LocalState\disc\.
++        _error = Localization.T("disc.error.dialog", "not available on this platform");
++#else
+         try
+         {
+             string? directory = null;
+@@ -69,6 +75,7 @@ public sealed class DiscPickerPopup : Popup
+         {
+             _error = Localization.T("disc.error.dialog", e.Message);
+         }
++#endif
+     }
+ 
+     private void Confirm()
+diff --git a/RecompOne.Runtime/Host/Window/Popups/ModsPopup.cs b/RecompOne.Runtime/Host/Window/Popups/ModsPopup.cs
+index 08d2398..2c5e120 100644
+--- a/RecompOne.Runtime/Host/Window/Popups/ModsPopup.cs
++++ b/RecompOne.Runtime/Host/Window/Popups/ModsPopup.cs
+@@ -292,7 +292,11 @@ public sealed class ModsPopup : Popup
+         {
+             var root = ModLoader.Root;
+             if (string.IsNullOrEmpty(root)) root = Path.GetFullPath("mods");
++#if RECOMPONE_UWP
++            Console.WriteLine($"[Mods] mods folder: {root}");
++#else
+             Process.Start(new ProcessStartInfo(root) { UseShellExecute = true });
++#endif
+         }
+         catch (Exception e)
+         {
+diff --git a/RecompOne.Runtime/Host/Window/Settings/Sections/PathsSettingsSection.cs b/RecompOne.Runtime/Host/Window/Settings/Sections/PathsSettingsSection.cs
+index 77c2dd1..289ca78 100644
+--- a/RecompOne.Runtime/Host/Window/Settings/Sections/PathsSettingsSection.cs
++++ b/RecompOne.Runtime/Host/Window/Settings/Sections/PathsSettingsSection.cs
+@@ -1,6 +1,8 @@
+ using System.Numerics;
+ using ImGuiNET;
++#if !RECOMPONE_UWP
+ using NativeFileDialogNET;
++#endif
+ using RecompOne.Runtime.Config;
+ 
+ namespace RecompOne.Runtime.Host.Window;
+@@ -96,6 +98,7 @@ internal sealed class PathsSettingsSection : ISettingsSection
+             {
+             }
+ 
++#if !RECOMPONE_UWP
+             using var dialog = new NativeFileDialog();
+             if (save) dialog.SaveFile();
+             else dialog.SelectFile();
+@@ -106,6 +109,7 @@ internal sealed class PathsSettingsSection : ISettingsSection
+                 result = picked;
+                 changed = true;
+             }
++#endif
+         }
+ 
+         return changed;
+diff --git a/RecompOne.Runtime/Modding/ModLoader.Uwp.cs b/RecompOne.Runtime/Modding/ModLoader.Uwp.cs
+new file mode 100644
+index 0000000..94586ac
+--- /dev/null
++++ b/RecompOne.Runtime/Modding/ModLoader.Uwp.cs
+@@ -0,0 +1,53 @@
++#if RECOMPONE_UWP
++namespace RecompOne.Runtime.Modding;
++
++// Xbox (UWP + NativeAOT): los mods se compilan con Roslyn y se enganchan con MonoMod, y las dos cosas
++// generan código en tiempo de ejecución, que NativeAOT no admite. Esta versión conserva la API pública
++// de ModLoader (la usan Entry.cs, generado, y el popup de mods) sin cargar nada.
++public sealed class ModEntry
++{
++    public ModInfo Info = null!;
++    public bool Enabled;
++    public bool Loaded;
++    public int HookCount;
++    public byte[]? IconData;
++    public bool HasSettings { get; internal set; }
++    public string? LoadError { get; internal set; }
++
++    public void DrawSettings()
++    {
++    }
++}
++
++public static class ModLoader
++{
++    public static IReadOnlyList<ModEntry> Mods => [];
++
++    public static IReadOnlyList<ModInfo> LoadedMods => [];
++
++    public static string Root { get; private set; } = "";
++
++    public static void LoadAll(string? root = null)
++    {
++        Console.WriteLine("[Mods] mods disabled on this build");
++    }
++
++    public static bool PollChanges()
++    {
++        return false;
++    }
++
++    public static bool Rescan()
++    {
++        return false;
++    }
++
++    public static void SetEnabled(string id, bool enabled)
++    {
++    }
++
++    public static void Reload(string id)
++    {
++    }
++}
++#endif
+diff --git a/RecompOne.Runtime/RecompOne.Runtime.csproj b/RecompOne.Runtime/RecompOne.Runtime.csproj
+index 237f864..9fc4ee5 100644
+--- a/RecompOne.Runtime/RecompOne.Runtime.csproj
++++ b/RecompOne.Runtime/RecompOne.Runtime.csproj
+@@ -23,15 +23,32 @@
+     </ItemGroup>
+ 
+     <ItemGroup>
+-        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.6.0"/>
+-        <PackageReference Include="MonoMod.RuntimeDetour" Version="25.3.6"/>
+-        <PackageReference Include="NativeFileDialogNET" Version="2.0.2"/>
+         <PackageReference Include="NVorbis" Version="0.10.5"/>
+         <PackageReference Include="Silk.NET" Version="2.22.0"/>
+-        <PackageReference Include="Silk.NET.OpenAL.Soft.Native" Version="1.23.1"/>
+         <PackageReference Include="Silk.NET.OpenGL.Extensions.ImGui" Version="2.22.0"/>
+         <PackageReference Include="Silk.NET.SDL" Version="2.23.0"/>
+         <PackageReference Include="StbImageSharp" Version="2.30.15"/>
+     </ItemGroup>
+ 
++    <!-- Escritorio: mods (Roslyn + MonoMod), diálogos nativos y OpenAL Soft. -->
++    <ItemGroup Condition="'$(RecompOneUwp)' != 'true'">
++        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.6.0"/>
++        <PackageReference Include="MonoMod.RuntimeDetour" Version="25.3.6"/>
++        <PackageReference Include="NativeFileDialogNET" Version="2.0.2"/>
++        <PackageReference Include="Silk.NET.OpenAL.Soft.Native" Version="1.23.1"/>
++    </ItemGroup>
++
++    <!-- Xbox (UWP + NativeAOT): ventana, entrada y audio por SDL2; sin mods ni diálogos nativos. -->
++    <PropertyGroup Condition="'$(RecompOneUwp)' == 'true'">
++        <DefineConstants>$(DefineConstants);RECOMPONE_UWP</DefineConstants>
++    </PropertyGroup>
++    <ItemGroup Condition="'$(RecompOneUwp)' == 'true'">
++        <PackageReference Include="Silk.NET.Windowing.Sdl" Version="2.22.0"/>
++        <PackageReference Include="Silk.NET.Input.Sdl" Version="2.22.0"/>
++        <Compile Remove="Modding\ModCompiler.cs;Modding\HookManager.cs;Modding\ModLoader.cs"/>
++    </ItemGroup>
++    <ItemGroup Condition="'$(RecompOneUwp)' != 'true'">
++        <Compile Remove="Modding\ModLoader.Uwp.cs"/>
++    </ItemGroup>
++
+ </Project>

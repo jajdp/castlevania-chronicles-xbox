@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<!-- Manifiesto del paquete UWP de Castlevania Chronicles para la Xbox Series en modo desarrollador.
+     El nombre visible sale de identidad-visual.xlsx (columna xbox_nombre); los mosaicos, de Assets\.
+     La versión SUBE en cada ciclo: la consola no reemplaza un paquete por otro de la misma
+     (xbox\herramientas\empaquetar-uwp.ps1 la pone al empaquetar). -->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap mp rescap">
+
+  <!-- CAMBIA LAS DOS PRIMERAS LINEAS POR LAS TUYAS antes de empaquetar.
+
+       Publisher tiene que ser IDENTICO al sujeto de tu certificado de firma. Si no coinciden,
+       la consola rechaza el paquete.
+
+       Name es el nombre interno del paquete. Con el Publisher forma la FAMILIA, que es como la
+       consola reconoce al juego y de la que cuelga su LocalState. Eligelo una vez y dejalo. -->
+  <Identity
+    Name="CHANGE-ME-CastlevaniaChronicles"
+    Publisher="CN=CHANGE-ME"
+    Version="0.1.0.0"
+    ProcessorArchitecture="x64" />
+
+  <mp:PhoneIdentity PhoneProductId="3c6e0b52-8d1f-4a7e-b9c4-71f0d2a5e6b8" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
+
+  <Properties>
+    <DisplayName>Castlevania Chronicles Recomp</DisplayName>
+    <PublisherDisplayName>CHANGE-ME</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <!-- VCLibs va como framework, nunca copiado dentro: SDL2, Mesa y cimgui importan vcruntime140_app.dll
+       y msvcp140_app.dll, y con las DLL al lado del .exe la activación falla con 0x8027025B
+       (Animal Crossing). La consola ya tiene el framework. -->
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Universal" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+    <PackageDependency Name="Microsoft.VCLibs.140.00" MinVersion="14.0.33519.0" Publisher="CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" />
+  </Dependencies>
+
+  <!-- Con makeappx no vale Language="x-generate" (es un token de MSBuild): la consola lo rechaza
+       al registrar con 0x80070057. -->
+  <Resources>
+    <Resource Language="EN-US"/>
+    <Resource uap:Scale="200"/>
+  </Resources>
+
+  <Applications>
+    <!-- El ejecutable es NativeAOT (.NET 10) y la CoreApplication la monta SDL2 (SDL_WinRTRunApp);
+         EntryPoint no se instancia. -->
+    <Application Id="App" Executable="CastlevaniaChronicles.exe" EntryPoint="CastlevaniaChronicles.App">
+      <uap:VisualElements
+        DisplayName="Castlevania Chronicles Recomp"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png"
+        Description="UWP build of the RecompOne static recompilation of Castlevania Chronicles, for an Xbox Series in Developer Mode"
+        BackgroundColor="#000000">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+        <uap:SplashScreen Image="Assets\SplashScreen.png" />
+      </uap:VisualElements>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust"/>
+    <rescap:Capability Name="expandedResources" />
+    <Capability Name="internetClient" />
+  </Capabilities>
+</Package>

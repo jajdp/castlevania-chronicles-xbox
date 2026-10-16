@@ -1,0 +1,6 @@
+<Project>
+    <!-- Árbol de Xbox: RecompOne.Runtime se compila con la variante UWP (RECOMPONE_UWP). -->
+    <PropertyGroup>
+        <RecompOneUwp>true</RecompOneUwp>
+    </PropertyGroup>
+</Project>

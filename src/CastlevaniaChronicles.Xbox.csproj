@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!--
+      Castlevania Chronicles para la Xbox: NativeAOT + UWP, con la CoreApplication en manos de SDL2
+      (worleydl/uwp-dep), como Celeste64-uwp. Sustituye a Program.cs.
+      Con -p:XboxUwp=false sale un .exe de escritorio con el mismo código (vista SDL, audio SDL, sin mods)
+      para probarlo en el PC antes de llevarlo a la consola.
+    -->
+    <PropertyGroup>
+        <XboxUwp Condition="'$(XboxUwp)' == ''">true</XboxUwp>
+        <AssemblyName>CastlevaniaChronicles</AssemblyName>
+        <RootNamespace>Chronicles.Xbox</RootNamespace>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+        <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+        <SelfContained>true</SelfContained>
+        <PublishAot>true</PublishAot>
+        <!-- RecompOne usa reflexión en la configuración (System.Text.Json): se conserva entero. -->
+        <TrimMode>partial</TrimMode>
+        <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+        <InvariantGlobalization>true</InvariantGlobalization>
+        <OptimizationPreference>Speed</OptimizationPreference>
+        <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+        <DebugType>none</DebugType>
+        <!-- Avisos del código generado (inalcanzable) y de los paneles de depuración del runtime. -->
+        <NoWarn>$(NoWarn);CS0162;CS8602;CS0219</NoWarn>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(XboxUwp)' == 'true'">
+        <OutputType>WinExe</OutputType>
+        <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+        <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+        <UseUwp>true</UseUwp>
+        <!-- App CoreApplication sin XAML (la ventana es de SDL). -->
+        <EnableXamlCompilerTargetsForUwpApps>false</EnableXamlCompilerTargetsForUwpApps>
+        <DefineConstants>$(DefineConstants);XBOX_UWP</DefineConstants>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(XboxUwp)' != 'true'">
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <Compile Include="XboxProgram.cs"/>
+        <Compile Include="..\generated\**\*.cs"/>
+        <Compile Include="..\patches\**\*.cs"/>
+        <ProjectReference Include="..\vendor\RecompOne\RecompOne.Runtime\RecompOne.Runtime.csproj"/>
+    </ItemGroup>
+</Project>
