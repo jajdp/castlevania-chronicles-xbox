@@ -11,7 +11,7 @@
 | Visual Studio 2022 | Por las herramientas de C++ con las que enlaza NativeAOT, y por `makeappx`/`signtool` |
 | Python 3 | Para `partir_disco.py`. Solo biblioteca estándar |
 | PowerShell | La 5.1 que trae Windows |
-| Una Xbox Series | En **modo desarrollador**, con un usuario conectado |
+| Una Xbox Series X | En **modo desarrollador**, con un usuario conectado |
 
 ⚠ Aquí importa más la versión del **proyecto del juego** que la de RecompOne: el parche se genera
 contra el árbol que prepara la `v0.3.9`. Una release posterior del proyecto puede mover los mismos

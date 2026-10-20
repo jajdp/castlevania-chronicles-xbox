@@ -1,7 +1,7 @@
 # Castlevania Chronicles en la Xbox — el port UWP
 
 Cómo coger la recompilación estática [RecompOne](https://github.com/BlackLabelHQ/RecompOne) de
-*Castlevania Chronicles* (PlayStation, 2001) y hacerla correr **en una Xbox Series en modo
+*Castlevania Chronicles* (PlayStation, 2001) y hacerla correr **en una Xbox Series X en modo
 desarrollador**.
 
 *(English: [README.md](README.md))*
@@ -10,6 +10,16 @@ Este fue el primer juego de RecompOne que corrió en una consola: el recompilado
 MIPS de la PlayStation en **C#**, así que el port es una aplicación .NET compilada con **NativeAOT
 para UWP**, sobre SDL2 y Mesa. Llega a la pantalla de la tarjeta de memoria a 1080p y se juega con
 mando, y está en dos consolas desde el 2026-10-02.
+
+## En qué consola se probó
+
+**En una Xbox Series X**, en modo desarrollador. Las dos consolas en las que se construyó y se probó esto
+son Series X, así que es el único hardware al que se refiere cualquier cosa que se afirme aquí.
+
+**En una Series S no se ha probado nunca, ni una vez.** Es otra máquina: menos memoria disponible para un
+juego y una GPU más floja. Puede que funcione en una, puede que vaya más despacio, o puede que no
+arranque; nada de aquí se ha medido en ella. Si lo ejecutas en una Series S, lo que obtengas no es lo que
+dice este README, y ninguna de las cifras de aquí es una promesa sobre esa consola.
 
 ## Qué es este repositorio
 

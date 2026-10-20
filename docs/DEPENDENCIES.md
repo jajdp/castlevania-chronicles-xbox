@@ -11,7 +11,7 @@
 | Visual Studio 2022 | For the C++ tools NativeAOT links through, and for `makeappx`/`signtool` |
 | Python 3 | For `partir_disco.py`. Standard library only |
 | PowerShell | The 5.1 that Windows ships |
-| An Xbox Series | In **Developer Mode**, with a user signed in |
+| An Xbox Series X | In **Developer Mode**, with a user signed in |
 
 ⚠ The version of the **game project** matters more than RecompOne's: the patch is generated against
 the tree `v0.3.9` prepares. A later release of the game project may move the same files around, and

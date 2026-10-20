@@ -1,7 +1,7 @@
 # Castlevania Chronicles on Xbox — the UWP port
 
 How to take the [RecompOne](https://github.com/BlackLabelHQ/RecompOne) static recompilation of
-*Castlevania Chronicles* (PlayStation, 2001) and run it **on an Xbox Series in Developer Mode**.
+*Castlevania Chronicles* (PlayStation, 2001) and run it **on an Xbox Series X in Developer Mode**.
 
 *(Español: [README.es.md](README.es.md))*
 
@@ -9,6 +9,16 @@ This was the first RecompOne game to run on a console: the recompiler turns the 
 code into **C#**, so the port is a .NET application compiled with **NativeAOT for UWP**, on SDL2 and
 Mesa. It reaches the memory-card screen at 1080p and plays with a controller, and it has been on two
 consoles since 2026-10-02.
+
+## Which console this was tested on
+
+**An Xbox Series X**, in Developer Mode. Both of the consoles this was built and tested on are Series X,
+so that is the only hardware anything claimed here covers.
+
+**A Series S has never been tried — not once.** It is a different machine: less memory available to a
+game and a weaker GPU. This may work on one, it may run slower, or it may not start at all; nothing here
+has been measured on it. If you run it on a Series S, what you get is not what this README reports, and
+none of the numbers here are a promise about that console.
 
 ## What this repository is
 
