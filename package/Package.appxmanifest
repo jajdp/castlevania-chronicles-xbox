@@ -33,8 +33,8 @@
   </Properties>
 
   <!-- VCLibs va como framework, nunca copiado dentro: SDL2, Mesa y cimgui importan vcruntime140_app.dll
-       y msvcp140_app.dll, y con las DLL al lado del .exe la activación falla con 0x8027025B
-       (Animal Crossing). La consola ya tiene el framework. -->
+       y msvcp140_app.dll, y con las DLL al lado del .exe la activación falla con 0x8027025B.
+       La consola tiene que tener el framework instalado. -->
   <Dependencies>
     <TargetDeviceFamily Name="Windows.Universal" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
     <PackageDependency Name="Microsoft.VCLibs.140.00" MinVersion="14.0.33519.0" Publisher="CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" />

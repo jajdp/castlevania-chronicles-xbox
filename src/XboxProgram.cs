@@ -118,7 +118,7 @@ internal static unsafe class XboxProgram
     // usuario: se ve mal —bordes y objetos que entran tarde— y no hay ninguna versión panorámica mejor publicada,
     // ni en el proyecto ni fuera de él. Hasta esa fecha iba encendida, porque en la consola no hay teclado para F8.
     // LocalState\entorno.txt añade o cambia variables, una NOMBRE=valor por línea («#» comenta):
-    // CHRONICLES_WIDESCREEN=1 la recupera. Receta del Monster Hunter de la zona IA (Recompilaciones, 2026-10-03).
+    // CHRONICLES_WIDESCREEN=1 la recupera.
     private static void SetEnvironment(string local)
     {
         if (Environment.GetEnvironmentVariable("CHRONICLES_WIDESCREEN") == null)

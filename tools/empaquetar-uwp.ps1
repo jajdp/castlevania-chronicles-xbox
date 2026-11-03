@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   No hay proyecto de Visual Studio que empaquete: el ejecutable sale de `dotnet publish` con NativeAOT
-  (xbox\herramientas\construir-uwp.ps1) y el paquete se arma a mano con makeappx, como Animal Crossing.
+  (xbox\herramientas\construir-uwp.ps1) y el paquete se arma a mano con makeappx.
   Contenido: CastlevaniaChronicles.exe, las DLL de worleydl/uwp-dep (SDL2 para WinRT, Mesa 25.1.1 y
   libuwp), cimgui.dll compilado para UWP, el manifiesto y los mosaicos de xbox\package\.
   EL DISCO NO VA DENTRO (528 MB): se sube aparte a LocalState\disc\ en partes de 150 MiB.

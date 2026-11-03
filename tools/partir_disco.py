@@ -1,7 +1,7 @@
 # Parte un archivo en trozos para subirlo por el Device Portal de la Xbox: las subidas pasan por
-# D:\DevelopmentFiles (5 GB, usually nearly full) and a PS1 disc image does not fit
-# (528 MB) respondió 500. La entrada UWP del juego (UWP\SDL_winrt_main_NonXAML.cpp) une las partes al
-# arrancar. Copia de partir_disco.py de Melee (2026-10-01), con la carpeta de salida como argumento.
+# D:\DevelopmentFiles (5 GB, casi siempre casi llena) y la imagen del disco entera (528 MB)
+# respondió 500. La entrada UWP del juego (UWP\SDL_winrt_main_NonXAML.cpp) une las partes al
+# arrancar. La carpeta de salida se pasa como argumento.
 # Uso: py -3.13 partir_disco.py <archivo> <carpeta de salida> [MiB por parte, 150 por defecto]
 import hashlib
 import os
