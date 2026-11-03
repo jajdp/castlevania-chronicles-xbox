@@ -19,14 +19,19 @@
 param(
   [string]$Version = '0.1.0.0',
   [string]$Huella  = 'CHANGE-ME',   # CN=Decompilaciones
-  [string]$Exe     = '<tree>',
-  [string]$UwpDep  = '<tree>',                  # worleydl/uwp-dep 0ec87d2
-  [string]$Cimgui  = '<tree>',  # cimgui 1.90.8 para UWP
-  [string]$Layouts = '<tree>'
+  [string]$Exe     = '',        # el ejecutable publicado con NativeAOT
+  [string]$UwpDep  = '',        # la carpeta con las DLL de worleydl/uwp-dep (commit 0ec87d2)
+  [string]$Cimgui  = '',        # cimgui.dll 1.90.8 compilada para UWP
+  [string]$Layouts = ''         # donde armar los layouts; por defecto, xbox\layouts
 )
 $ErrorActionPreference = 'Stop'
 
 $xbox    = Split-Path $PSScriptRoot -Parent
+foreach ($p in @(@{n='-Exe'; v=$Exe}, @{n='-UwpDep'; v=$UwpDep}, @{n='-Cimgui'; v=$Cimgui})) {
+  if (-not $p.v) { throw ("falta {0}: mire el bloque param() para saber que espera" -f $p.n) }
+}
+if (-not $Layouts) { $Layouts = Join-Path $xbox 'layouts' }
+if (-not (Test-Path -LiteralPath $Layouts)) { New-Item -ItemType Directory -Path $Layouts | Out-Null }
 $package = Join-Path $xbox 'package'
 $paquete = Join-Path $xbox 'paquete'
 

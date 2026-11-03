@@ -16,7 +16,7 @@
   del proyecto tocan los mismos archivos del runtime que la variante UWP.
   y del disco del usuario (USA SLUS-01384), del que se genera el C# del juego.
 
-  Pasos: 1) SDK de .NET 10.0.401 portátil en <tree>;  2) árbol en <Raiz>\xb con los 5 parches del
+  Pasos: 1) SDK de .NET 10.0.401 portátil en <Raiz>\dotnet (o donde diga -Dotnet);  2) árbol en <Raiz>\xb con los 5 parches del
   proyecto y el parche UWP;  3) C# del juego generado desde el disco + parche de sprites;  4) cimgui para
   UWP (CMake, WindowsStore);  5) dotnet publish con NativeAOT;  6) empaquetar-uwp.ps1 (makeappx + firma).
   Necesita Visual Studio 2022 con C++ (link.exe y el SDK de Windows), CMake, Git y Python 3.13 (py).
@@ -30,7 +30,8 @@
 [CmdletBinding()]
 param(
   [string]$Cue = '',
-  [string]$Raiz = '<tree>',
+  [string]$Raiz = '',
+  [string]$Dotnet = '',          # carpeta del SDK de .NET 10 portatil; por defecto <Raiz>\dotnet
   [string]$Version = '',
   [string]$Fuente = '',
   [string]$ParcheUwp = '',
@@ -38,6 +39,8 @@ param(
   [switch]$Reusar
 )
 if (-not $Reusar -and -not $Cue) { throw 'falta -Cue (o -Reusar con un árbol ya construido)' }
+if (-not $Raiz) { throw 'falta -Raiz: la carpeta de trabajo donde van el árbol (xb\), el SDK y los paquetes' }
+if (-not $Dotnet) { $Dotnet = Join-Path $Raiz 'dotnet' }
 $ErrorActionPreference = 'Stop'
 $xbox = Split-Path $PSScriptRoot -Parent
 $sub = Split-Path $xbox -Parent
@@ -57,15 +60,15 @@ function Nativo([scriptblock]$b, [string]$que) { & $b; if ($LASTEXITCODE -ne 0) 
 
 # --- 1. SDK de .NET 10 portátil ---------------------------------------------
 Paso '1. SDK de .NET 10.0.401'
-$dotnet = '<tree>'
+$dotnet = Join-Path $Dotnet 'dotnet.exe'
 if (-not (Test-Path -LiteralPath $dotnet)) {
   $inst = Join-Path $env:TEMP 'dotnet-install.ps1'
   Invoke-WebRequest -Uri 'https://dot.net/v1/dotnet-install.ps1' -OutFile $inst -UseBasicParsing
-  & $inst -Version 10.0.401 -InstallDir '<tree>' -NoPath
+  & $inst -Version 10.0.401 -InstallDir $Dotnet -NoPath
 }
 # vswhere: lo llaman los targets de NativeAOT para encontrar link.exe.
-$env:PATH = '<tree>;' + ${env:ProgramFiles(x86)} + '\Microsoft Visual Studio\Installer;' + $env:PATH
-$env:DOTNET_ROOT = '<tree>'; $env:DOTNET_MULTILEVEL_LOOKUP = '0'; $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
+$env:PATH = "$Dotnet;" + ${env:ProgramFiles(x86)} + '\Microsoft Visual Studio\Installer;' + $env:PATH
+$env:DOTNET_ROOT = $Dotnet; $env:DOTNET_MULTILEVEL_LOOKUP = '0'; $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 $env:DOTNET_NOLOGO = '1'; $env:NUGET_PACKAGES = Join-Path $Raiz 'nuget'
 & $dotnet --version
 
