@@ -71,6 +71,18 @@ and the game project's own build. The claim is the recipe.
 
 ## Credits and license
 
+**Almost none of what makes this work is ours.** This repository is a recipe that glues together other people's work; without any one of these pieces there would be no port at all.
+
+| What it does | Who made it | License |
+|---|---|---|
+| **[RecompOne](https://github.com/BlackLabelHQ/RecompOne)** — the PS1 recompilation engine behind it | **BlackLabelHQ** | see the project |
+| **[castlevania-chronicles-recomp](https://github.com/Spicywonda/castlevania-chronicles-recomp)** — recompiles *Castlevania Chronicles* | **Spicywonda** | none declared |
+| **[SDL](https://github.com/libsdl-org/SDL)** — window, input and audio | **Sam Lantinga** and the SDL contributors | zlib |
+| **[Mesa](https://mesa3d.org)** — the OpenGL implementation used on the console | the **Mesa** contributors | MIT |
+
+**The packaging recipe, the tooling and this documentation** are by **Recompilaciones**.
+
+
 Port and tooling by **Recompilaciones**, under the [MIT License](LICENSE) — the license of
 RecompOne, which is what this patches.
 

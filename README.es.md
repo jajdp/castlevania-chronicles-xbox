@@ -72,6 +72,18 @@ completo de .NET y la compilación del propio proyecto del juego. Lo que se afir
 
 ## Créditos y licencia
 
+**Casi nada de lo que hace que esto funcione es nuestro.** Este repositorio es una receta que une el trabajo de otros; sin cualquiera de estas piezas no habría port.
+
+| Qué hace | Quién lo hizo | Licencia |
+|---|---|---|
+| **[RecompOne](https://github.com/BlackLabelHQ/RecompOne)** — el motor de recompilación de PS1 que hay debajo | **BlackLabelHQ** | see the project |
+| **[castlevania-chronicles-recomp](https://github.com/Spicywonda/castlevania-chronicles-recomp)** — recompila *Castlevania Chronicles* | **Spicywonda** | none declared |
+| **[SDL](https://github.com/libsdl-org/SDL)** — ventana, mando y audio | **Sam Lantinga** and the SDL contributors | zlib |
+| **[Mesa](https://mesa3d.org)** — la implementación de OpenGL que se usa en la consola | the **Mesa** contributors | MIT |
+
+**La receta de empaquetado, las herramientas y esta documentación** son de **Recompilaciones**.
+
+
 Port y herramientas de **Recompilaciones**, bajo la [licencia MIT](LICENSE) — la de RecompOne, que
 es lo que esto parchea.
 
